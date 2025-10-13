@@ -114,14 +114,8 @@ def parse_units(html, url, total_units):
     for row in rows:
         tds = row.find_all("td", recursive=False)
 
-        # Skip non-data rows (e.g., the "Show X more units" row)
-        if len(tds) == 1:
-            only = norm(tds[0].get_text(" ", strip=True)).lower()
-            if "show" in only and "more units" in only:
-                continue
-
+        # Skip non-data rows
         if len(tds) < 4:
-            # Not a standard data row
             continue
 
         # --- Column mapping by position ---
@@ -130,79 +124,65 @@ def parse_units(html, url, total_units):
         avail_cell = norm(tds[2].get_text(" ", strip=True))
         rent_cell = norm(tds[3].get_text(" ", strip=True))
 
-        # --- Extract layout from the unit cell, then remove it to reveal unit number ---
-        # handles "2 bd, 1 ba", "Studio, 1 ba", "2 bd", "1.5 ba"
+        # --- Extract layout from the unit cell, then remove it ---
         layout_pat = r"(?i)(studio(?:,\s*\d+\.?\d*\s*ba)?|[0-9]+\s*bd\s*,\s*[0-9]+\.?\d*\s*ba|[0-9]+\s*bd|[0-9]+\.?\d*\s*ba)"
         layout_m = re.search(layout_pat, unit_cell)
         layout = norm(layout_m.group(0)) if layout_m else None
 
         unit_text_wo_layout = unit_cell
         if layout_m:
-            # remove only the first occurrence of the matched layout chunk
             start, end = layout_m.span()
             unit_text_wo_layout = (unit_cell[:start] + " " + unit_cell[end:]).strip()
 
-        # strip known tag words left in the unit cell
+        # --- Clean known promo tags from the remaining text ---
         unit_text_wo_layout = re.sub(r"(?i)\b(Floor plan|3D tour|Special offer|\d+\s*photos?)\b", " ", unit_text_wo_layout)
         unit_text_wo_layout = norm(unit_text_wo_layout)
 
-        # --- [IMPROVED] Extract unit number ---
+        # --- [NEW LOGIC] Extract unit number ---
         unit_number = None
-        # A series of patterns to try in order. First match wins.
         patterns_to_try = [
-            # 1. For formats like 'A-244', 'B505'. Case-insensitive match, then uppercase.
+            # 1. For structured formats like 'A-244', 'B505', etc.
             (re.compile(r"\b[A-Z]-?\d+\b", re.IGNORECASE), lambda m: m.group(0).upper()),
-            
-            # 2. For formats like '1-215', '1-6520311'.
+            # 2. For hyphenated numbers like '1-215'.
             (re.compile(r"\b\d+-\d+\b"), lambda m: m.group(0)),
-            
-            # 3. For formats like 'Plan 1X1', 'Unit 10207', '# 5'. Captures the identifier after the keyword.
-            (re.compile(r"(?i)\b(?:Plan|Unit|Apt|#|Model)\s*([A-Za-z0-9\-]+)\b"), lambda m: m.group(1)),
-            
-            # 4. For alphanumeric codes like '1X1', 'TH3B'. Must contain at least one letter.
-            # Uses a lookahead to ensure a letter exists. Matches 2-8 character codes.
-            (re.compile(r"\b(?=\w*[a-zA-Z])\w{2,8}\b", re.IGNORECASE), lambda m: m.group(0).upper()),
-            
-            # 5. For pure numbers of 2 or more digits, like '10207'.
+            # 3. For keyword-prefixed names like 'Plan 2D'. Captures the *entire* phrase.
+            (re.compile(r"(?i)\b(?:Plan|Unit|Apt|#|Model)\s*[A-Za-z0-9\s\-]+"), lambda m: m.group(0).strip()),
+            # 4. For alphanumeric codes like '1X1' (must contain both letters and numbers).
+            (re.compile(r"\b(?=[A-Za-z]*\d)(?=\d*[A-Za-z])[A-Za-z0-9]{2,8}\b"), lambda m: m.group(0).upper()),
+            # 5. For pure numbers of 2 or more digits.
             (re.compile(r"\b\d{2,8}\b"), lambda m: m.group(0)),
-
-            # 6. Fallback for single-digit unit numbers. Last resort.
-            (re.compile(r"\b\d\b"), lambda m: m.group(0))
         ]
 
         for pattern, extractor in patterns_to_try:
             match = pattern.search(unit_text_wo_layout)
             if match:
                 unit_number = extractor(match)
-                break # Stop after the first successful match
+                break
 
-        # --- Sqft: prefer the numeric portion from the sqft cell; ignore if it's actually layout text ---
+        # FALLBACK: If no structured number was found, use the remaining text as the unit name.
+        if not unit_number and unit_text_wo_layout:
+            unit_number = unit_text_wo_layout
+
+        # --- Sqft ---
         sqft = None
         if sqft_cell and not re.search(r"(?i)\bbd\b|\bba\b|studio", sqft_cell):
             num = re.search(r"\d[\d,]*", sqft_cell)
-            sqft = num.group(0) if num else sqft_cell  # keep raw if no pure number
+            sqft = num.group(0) if num else sqft_cell
         else:
-            # fallback: try to find a pure number anywhere in the row AFTER we've already taken layout
-            # but avoid picking up dates (Nov 1) by requiring 3+ digits
             num = re.search(r"\b\d{3,4}\b", unit_cell)
             sqft = num.group(0) if num else None
 
-        # --- Availability: should look like "Now", "Dec 1", "Nov 12" etc. ---
+        # --- Availability ---
         availability = avail_cell or None
-        # If availability is actually a number (e.g., 788), try to detect a date-like token from unit_cell/rent cell
         if availability and re.fullmatch(r"\d{3,4}", availability):
-            # Look for month + day in the row text
             all_text = " ".join([unit_cell, sqft_cell, avail_cell, rent_cell])
             date_m = re.search(r"(?i)\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.? \d{1,2}\b|\bNow\b", all_text)
-            if date_m:
-                availability = date_m.group(0).replace(".", "")
-            else:
-                availability = None  # leave unknown rather than wrong
+            availability = date_m.group(0).replace(".", "") if date_m else None
 
-        # --- Rent (keep full string like "$3,509+") ---
+        # --- Rent ---
         rent = rent_cell or None
 
-        # --- Image (best-effort) ---
+        # --- Image ---
         img_el = tds[0].select_one("img") or row.select_one("img")
         image = img_el["src"] if img_el and img_el.has_attr("src") else None
 
@@ -223,7 +203,6 @@ def parse_units(html, url, total_units):
 # Main function
 # ----------------------------
 async def main(input_file, out_file, headless=True):
-    # Read URLs and total unit counts from the input file
     properties_to_scrape = []
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
@@ -267,7 +246,6 @@ async def main(input_file, out_file, headless=True):
         await context.close()
         await browser.close()
 
-    # Save JSON file only
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(all_units, f, indent=2, ensure_ascii=False)
 
@@ -283,7 +261,6 @@ if __name__ == "__main__":
     parser.add_argument("--headless", type=str, default="true", help="Set 'false' to keep Chrome visible")
     args = parser.parse_args()
 
-    # Generate output file name from input file name
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = os.path.splitext(args.input)[0]
     json_out = f"{base_name}_{ts}.json"
