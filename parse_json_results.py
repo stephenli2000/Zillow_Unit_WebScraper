@@ -45,8 +45,9 @@ def extract_bed_bath(layout):
     bath_match = re.search(r"(\d+(?:\.\d+)?)\s*ba", layout, re.IGNORECASE)
     bed = int(bed_match.group(1)) if bed_match else None
     bath = float(bath_match.group(1)) if bath_match else None
+    # CHANGED: Treat Studio as 1 bedroom
     if bed is None and isinstance(layout, str) and 'studio' in layout.lower():
-        bed = 0
+        bed = 1
     return bed, bath
 
 
@@ -64,28 +65,32 @@ def get_summary_stats(df):
     stats = {
         "listings_matched": len(df),
         "avg_rent": None, "min_rent": None, "max_rent": None,
-        "avg_rent_per_sqft": None,
+        "avg_rent_per_sqft": None, "avg_sqft": None
     }
 
-    for i in range(4): # 0br (Studio) to 3br
+    # Initialize keys for 1, 2, and 3 bedrooms
+    for i in range(1, 4):
         stats[f'avg_rent_per_sqft_{i}br'] = None
+        stats[f'avg_sqft_{i}br'] = None
 
     if not df.empty and df["rent_value"].notna().any() and df["sqft_value"].notna().any():
         stats["avg_rent"] = df["rent_value"].mean()
         stats["min_rent"] = df["rent_value"].min()
         stats["max_rent"] = df["rent_value"].max()
         avg_sqft = df["sqft_value"].mean()
+        stats["avg_sqft"] = avg_sqft
         if avg_sqft and avg_sqft > 0:
             stats["avg_rent_per_sqft"] = stats["avg_rent"] / avg_sqft
         
-        for br_count in range(4): # 0, 1, 2, 3
+        # Calculate stats for 1, 2, and 3 bedrooms
+        for br_count in range(1, 4):
             br_df = df[df['bedrooms'] == br_count]
             if not br_df.empty and br_df["rent_value"].notna().any() and br_df["sqft_value"].notna().any():
-                br_avg_rent = br_df['rent_value'].mean()
                 br_avg_sqft = br_df['sqft_value'].mean()
                 if br_avg_sqft and br_avg_sqft > 0:
-                    key = f'avg_rent_per_sqft_{br_count}br'
-                    stats[key] = br_avg_rent / br_avg_sqft
+                    stats[f'avg_sqft_{br_count}br'] = br_avg_sqft
+                    br_avg_rent = br_df['rent_value'].mean()
+                    stats[f'avg_rent_per_sqft_{br_count}br'] = br_avg_rent / br_avg_sqft
             
     return stats
 
@@ -102,14 +107,17 @@ def print_summary_stats(stats, title):
         print(f"Average Rent: ${stats['avg_rent']:,.0f}")
         print(f"Lowest Rent:  ${stats['min_rent']:,.0f}")
         print(f"Highest Rent: ${stats['max_rent']:,.0f}")
-    if stats['avg_rent_per_sqft'] is not None:
-        print(f"Average $/sqft: ${stats['avg_rent_per_sqft']:,.2f}")
     
-    br_map = {0: 'Studio', 1: '1br', 2: '2br', 3: '3br'}
+    # NEW: Combined value format
+    if stats.get('avg_rent_per_sqft') is not None and stats.get('avg_sqft') is not None:
+        print(f"Average Value: ${stats['avg_rent_per_sqft']:,.2f} @ {stats['avg_sqft']:,.0f} sqft")
+    
+    br_map = {1: '1br', 2: '2br', 3: '3br'}
     for br_count, label in br_map.items():
-        key = f'avg_rent_per_sqft_{br_count}br'
-        if stats.get(key) is not None:
-            print(f"Average $/sqft ({label}): ${stats[key]:,.2f}")
+        sqft_key = f'avg_sqft_{br_count}br'
+        rent_key = f'avg_rent_per_sqft_{br_count}br'
+        if stats.get(rent_key) is not None and stats.get(sqft_key) is not None:
+            print(f"Value ({label}): ${stats[rent_key]:,.2f} @ {stats[sqft_key]:,.0f} sqft")
 
 
 def main():
@@ -189,22 +197,35 @@ def main():
                 property_stats = get_summary_stats(property_filtered_units)
                 print_summary_stats(property_stats, "Summary for this Property")
 
+                # NEW: Create combined value fields for summary table
                 summary_entry = {
                     'property_url': property_url,
                     'total_units': total_units_str,
                     'available_units': available_units_scraped,
                     'availability_pct': availability_pct_str,
                     'filtered_units_count': property_stats['listings_matched'],
-                    'avg_rent': f"${property_stats['avg_rent']:,.0f}" if property_stats['avg_rent'] is not None else "N/A",
-                    'avg_$/sqft': f"${property_stats['avg_rent_per_sqft']:,.2f}" if property_stats['avg_rent_per_sqft'] is not None else "N/A",
                 }
-                for i in range(4):
-                    key = f'avg_rent_per_sqft_{i}br'
-                    col_name = f'avg_$/sqft_{i}br'
-                    value = property_stats.get(key)
-                    summary_entry[col_name] = f"${value:,.2f}" if value is not None else "N/A"
+
+                # Add overall average value
+                avg_rent_val = property_stats.get('avg_rent_per_sqft')
+                avg_sqft_val = property_stats.get('avg_sqft')
+                if avg_rent_val is not None and avg_sqft_val is not None:
+                    summary_entry['avg_value'] = f"${avg_rent_val:,.2f} @ {avg_sqft_val:,.0f} sqft"
+                else:
+                    summary_entry['avg_value'] = "N/A"
+
+                # Add per-bedroom values
+                for i in range(1, 4):
+                    rent_key = f'avg_rent_per_sqft_{i}br'
+                    sqft_key = f'avg_sqft_{i}br'
+                    col_name = f'value_{i}br'
+                    rent_val = property_stats.get(rent_key)
+                    sqft_val = property_stats.get(sqft_key)
+                    if rent_val is not None and sqft_val is not None:
+                        summary_entry[col_name] = f"${rent_val:,.2f} @ {sqft_val:,.0f} sqft"
+                    else:
+                        summary_entry[col_name] = "N/A"
                 
-                # NEW: Add a raw numeric value for sorting the final table
                 summary_entry['_sort_val_2br_sqft'] = property_stats.get('avg_rent_per_sqft_2br')
                 all_properties_summary_data.append(summary_entry)
 
@@ -220,10 +241,8 @@ def main():
                 print("="*80)
                 summary_df = pd.DataFrame(all_properties_summary_data)
                 
-                # NEW: Sort the DataFrame by the 2-bedroom $/sqft value
                 if '_sort_val_2br_sqft' in summary_df.columns:
                     summary_df = summary_df.sort_values(by='_sort_val_2br_sqft', ascending=True, na_position='last')
-                    # Drop the temporary sort column so it is not printed
                     summary_df = summary_df.drop(columns=['_sort_val_2br_sqft'])
                 
                 print(summary_df.to_string(index=False))
