@@ -105,18 +105,19 @@ def main():
     if args.date:
         df_filtered = df_filtered[df_filtered["availability"].astype(str).str.contains(args.date, case=False, na=False)]
     
-    # --- Iterate and Print by Property ---
+    # --- Iterate and Print by Property, collecting summary data ---
     pd.set_option("display.max_rows", None)
     pd.set_option("display.width", 200)
     pd.set_option("display.colheader_justify", "center")
     
-    # Group by original dataframe to include all properties
+    all_properties_summary = []
+
     for property_url, group in df.groupby('property_url'):
         print("\n" + "="*80)
         print(f"PROPERTY: {property_url}")
         print("="*80)
 
-        # 1. Filtered Unit Details for this Property
+        # 1. Filtered Unit Details
         property_filtered_units = df_filtered[df_filtered['property_url'] == property_url]
         
         print("--- Filtered Unit Details ---")
@@ -126,11 +127,12 @@ def main():
         else:
             print("No units match the specified filters for this property.")
 
-        # 2. Property Availability Summary (MOVED HERE)
+        # 2. Property Availability Summary
         total_units = group['total_property_units'].iloc[0]
         available_units_scraped = len(group)
         
         availability_pct_str = "N/A"
+        percentage = None
         if pd.notna(total_units) and total_units > 0:
             percentage = (available_units_scraped / total_units) * 100
             availability_pct_str = f"{percentage:.1f}%"
@@ -142,15 +144,38 @@ def main():
         print(f"Available Units (on Zillow): {available_units_scraped}")
         print(f"Availability Pct: {availability_pct_str}")
         
-        # 3. Summary for this Property's Filtered Units
+        # 3. Summary stats for this Property
         print_summary_stats(property_filtered_units, "Summary for this Property")
+        
+        # --- Collect data for the final summary table ---
+        avg_rent = property_filtered_units["rent_value"].mean()
+        avg_sqft = property_filtered_units["sqft_value"].mean()
+        avg_rent_per_sqft = avg_rent / avg_sqft if avg_sqft and avg_sqft > 0 else None
 
-    # --- Grand Total Summary ---
+        all_properties_summary.append({
+            "property_url": property_url,
+            "total_units": total_units,
+            "available_units": available_units_scraped,
+            "availability_pct": percentage,
+            "filtered_listings_count": len(property_filtered_units),
+            "avg_rent": avg_rent,
+            "avg_$/sqft": avg_rent_per_sqft
+        })
+
+    # --- Final Comparison Table ---
     print("\n" + "="*80)
-    print("GRAND TOTAL SUMMARY (ALL PROPERTIES)")
+    print("ALL PROPERTIES COMPARISON")
     print("="*80)
-    print_summary_stats(df_filtered, "Overall Summary (for all filtered results)")
 
+    summary_df = pd.DataFrame(all_properties_summary)
+
+    # Formatting for display
+    summary_df['total_units'] = summary_df['total_units'].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+    summary_df['availability_pct'] = summary_df['availability_pct'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "N/A")
+    summary_df['avg_rent'] = summary_df['avg_rent'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A")
+    summary_df['avg_$/sqft'] = summary_df['avg_$/sqft'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "N/A")
+
+    print(summary_df.to_string(index=False))
 
 if __name__ == "__main__":
     main()
