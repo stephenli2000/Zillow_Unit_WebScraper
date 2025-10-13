@@ -116,8 +116,17 @@ def main():
         print(f"PROPERTY: {property_url}")
         print("="*80)
 
-        # 1. Property Availability Summary
-        # FIXED: Use .iloc[0] to get the first item, not .first()
+        # 1. Filtered Unit Details for this Property
+        property_filtered_units = df_filtered[df_filtered['property_url'] == property_url]
+        
+        print("--- Filtered Unit Details ---")
+        if not property_filtered_units.empty:
+            display_cols = ["unit_number", "layout", "sqft", "availability", "rent"]
+            print(property_filtered_units[display_cols].to_string(index=False))
+        else:
+            print("No units match the specified filters for this property.")
+
+        # 2. Property Availability Summary (MOVED HERE)
         total_units = group['total_property_units'].iloc[0]
         available_units_scraped = len(group)
         
@@ -128,21 +137,11 @@ def main():
         
         total_units_str = f"{total_units:.0f}" if pd.notna(total_units) else "N/A"
 
-        print("--- Property Availability Summary ---")
+        print("\n--- Property Availability Summary ---")
         print(f"Total Units (from input): {total_units_str}")
         print(f"Available Units (on Zillow): {available_units_scraped}")
         print(f"Availability Pct: {availability_pct_str}")
         
-        # 2. Filtered Unit Details for this Property
-        property_filtered_units = df_filtered[df_filtered['property_url'] == property_url]
-        
-        print("\n--- Filtered Unit Details ---")
-        if not property_filtered_units.empty:
-            display_cols = ["unit_number", "layout", "sqft", "availability", "rent"]
-            print(property_filtered_units[display_cols].to_string(index=False))
-        else:
-            print("No units match the specified filters for this property.")
-
         # 3. Summary for this Property's Filtered Units
         print_summary_stats(property_filtered_units, "Summary for this Property")
 
