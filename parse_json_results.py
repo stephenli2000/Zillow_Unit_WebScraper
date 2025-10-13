@@ -45,7 +45,6 @@ def extract_bed_bath(layout):
     bath_match = re.search(r"(\d+(?:\.\d+)?)\s*ba", layout, re.IGNORECASE)
     bed = int(bed_match.group(1)) if bed_match else None
     bath = float(bath_match.group(1)) if bath_match else None
-    # Handle 'Studio' as 0 bedrooms
     if bed is None and isinstance(layout, str) and 'studio' in layout.lower():
         bed = 0
     return bed, bath
@@ -68,7 +67,6 @@ def get_summary_stats(df):
         "avg_rent_per_sqft": None,
     }
 
-    # Add keys for bedroom-specific stats
     for i in range(4): # 0br (Studio) to 3br
         stats[f'avg_rent_per_sqft_{i}br'] = None
 
@@ -80,7 +78,6 @@ def get_summary_stats(df):
         if avg_sqft and avg_sqft > 0:
             stats["avg_rent_per_sqft"] = stats["avg_rent"] / avg_sqft
         
-        # NEW: Calculate $/sqft for each bedroom count
         for br_count in range(4): # 0, 1, 2, 3
             br_df = df[df['bedrooms'] == br_count]
             if not br_df.empty and br_df["rent_value"].notna().any() and br_df["sqft_value"].notna().any():
@@ -108,7 +105,6 @@ def print_summary_stats(stats, title):
     if stats['avg_rent_per_sqft'] is not None:
         print(f"Average $/sqft: ${stats['avg_rent_per_sqft']:,.2f}")
     
-    # NEW: Print bedroom-specific $/sqft
     br_map = {0: 'Studio', 1: '1br', 2: '2br', 3: '3br'}
     for br_count, label in br_map.items():
         key = f'avg_rent_per_sqft_{br_count}br'
@@ -193,7 +189,6 @@ def main():
                 property_stats = get_summary_stats(property_filtered_units)
                 print_summary_stats(property_stats, "Summary for this Property")
 
-                # NEW: Collect data for final summary table including bedroom-specific $/sqft
                 summary_entry = {
                     'property_url': property_url,
                     'total_units': total_units_str,
@@ -203,11 +198,14 @@ def main():
                     'avg_rent': f"${property_stats['avg_rent']:,.0f}" if property_stats['avg_rent'] is not None else "N/A",
                     'avg_$/sqft': f"${property_stats['avg_rent_per_sqft']:,.2f}" if property_stats['avg_rent_per_sqft'] is not None else "N/A",
                 }
-                for i in range(4): # 0-3 bedrooms
+                for i in range(4):
                     key = f'avg_rent_per_sqft_{i}br'
                     col_name = f'avg_$/sqft_{i}br'
                     value = property_stats.get(key)
                     summary_entry[col_name] = f"${value:,.2f}" if value is not None else "N/A"
+                
+                # NEW: Add a raw numeric value for sorting the final table
+                summary_entry['_sort_val_2br_sqft'] = property_stats.get('avg_rent_per_sqft_2br')
                 all_properties_summary_data.append(summary_entry)
 
             print("\n" + "="*80)
@@ -221,6 +219,13 @@ def main():
                 print("ALL PROPERTIES COMPARISON")
                 print("="*80)
                 summary_df = pd.DataFrame(all_properties_summary_data)
+                
+                # NEW: Sort the DataFrame by the 2-bedroom $/sqft value
+                if '_sort_val_2br_sqft' in summary_df.columns:
+                    summary_df = summary_df.sort_values(by='_sort_val_2br_sqft', ascending=True, na_position='last')
+                    # Drop the temporary sort column so it is not printed
+                    summary_df = summary_df.drop(columns=['_sort_val_2br_sqft'])
+                
                 print(summary_df.to_string(index=False))
 
     finally:
