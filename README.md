@@ -9,6 +9,10 @@ This is vibe scraping: simple logs, human-like scrolling/delays, and a workflow 
 - **Why:** Understand (1) market trends around your property and (2) rent pricing.
 - **Not:** This software is not intended for scraping massive data automatically with no human involved.
 
+How to find out how many units offered by a property in San Jose?
+
+https://portal.sanjoseca.gov/deployed/sfjsp then search for property permit
+
 ## Setup
 ```bash
 python3 -m venv venv

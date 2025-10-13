@@ -203,9 +203,14 @@ def parse_units(html, url):
 # Main function
 # ----------------------------
 async def main(input_csv, out_file, headless=True):
-    # CHANGED: read a plain text file with one URL per line
+    # MODIFIED: Read a text file, extracting only the URL from each line
+    urls = []
     with open(input_csv, "r", encoding="utf-8") as f:
-        urls = [line.strip() for line in f if line.strip()]
+        for line in f:
+            if line.strip():
+                # Take the first part of the line, delimited by comma or space
+                url = line.split(",")[0].split()[0]
+                urls.append(url)
 
     all_units = []
 
@@ -261,4 +266,3 @@ if __name__ == "__main__":
 
     headless = args.headless.lower() == "true"
     asyncio.run(main(args.input, json_out, headless))
-
