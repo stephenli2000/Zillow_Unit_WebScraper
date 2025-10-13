@@ -99,7 +99,7 @@ async def scrape_complex(page, url):
 # ----------------------------
 # Parsing the units
 # ----------------------------
-def parse_units(html, url):
+def parse_units(html, url, total_units):
     from bs4 import BeautifulSoup
     import re
 
@@ -192,6 +192,7 @@ def parse_units(html, url):
 
         units.append({
             "property_url": url,
+            "total_property_units": total_units,
             "unit_number": unit_number,
             "layout": layout,
             "sqft": sqft,
@@ -206,14 +207,21 @@ def parse_units(html, url):
 # Main function
 # ----------------------------
 async def main(input_file, out_file, headless=True):
-    # MODIFIED: Read a text file, extracting only the URL from each line
-    urls = []
+    # Read URLs and total unit counts from the input file
+    properties_to_scrape = []
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
-            if line.strip():
-                # Take the first part of the line, delimited by comma or space
-                url = line.split(",")[0].split()[0]
-                urls.append(url)
+            line = line.strip()
+            if not line:
+                continue
+            
+            parts = [p.strip() for p in line.split(',')]
+            url = parts[0]
+            total_units = None
+            if len(parts) > 1 and parts[1].isdigit():
+                total_units = int(parts[1])
+            
+            properties_to_scrape.append({'url': url, 'total_units': total_units})
 
     all_units = []
 
@@ -227,23 +235,27 @@ async def main(input_file, out_file, headless=True):
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = await context.new_page()
 
-        for i, url in enumerate(urls):
+        for i, prop_data in enumerate(properties_to_scrape):
+            url = prop_data['url']
+            total_units = prop_data['total_units']
+            
             html = await scrape_complex(page, url)
             if html:
-                units = parse_units(html, url)
+                units = parse_units(html, url, total_units)
                 all_units.extend(units)
 
-            if i < len(urls) - 1:
+            if i < len(properties_to_scrape) - 1:
                 await human_delay(5, 12)
 
         print("Closing Playwright session...")
         await context.close()
         await browser.close()
 
-    # Save both JSON and CSV
+    # Save JSON file only
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(all_units, f, indent=2, ensure_ascii=False)
-    pd.DataFrame(all_units).to_csv(out_file.replace(".json", ".csv"), index=False)
+    
+    # REMOVED CSV output
 
     print(f"\n✅ Scraping completed. {len(all_units)} units saved to {out_file}")
 
@@ -259,7 +271,7 @@ if __name__ == "__main__":
 
     # Generate output file name from input file name
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_name = os.path.splitext(args.input)[0]  # Get basename from input
+    base_name = os.path.splitext(args.input)[0]
     json_out = f"{base_name}_{ts}.json"
 
     headless = args.headless.lower() == "true"
