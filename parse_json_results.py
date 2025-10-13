@@ -45,6 +45,9 @@ def extract_bed_bath(layout):
     bath_match = re.search(r"(\d+(?:\.\d+)?)\s*ba", layout, re.IGNORECASE)
     bed = int(bed_match.group(1)) if bed_match else None
     bath = float(bath_match.group(1)) if bath_match else None
+    # Handle 'Studio' as 0 bedrooms
+    if bed is None and isinstance(layout, str) and 'studio' in layout.lower():
+        bed = 0
     return bed, bath
 
 
@@ -53,7 +56,6 @@ def apply_filter(df, col, op_func, value):
     if op_func and value is not None:
         if col in df.columns:
             valid_mask = pd.notna(df[col])
-            # Apply the filter only to the valid rows
             df = df[valid_mask & df.loc[valid_mask, col].apply(lambda x: op_func(x, value))]
     return df
 
@@ -98,13 +100,12 @@ def print_summary_stats(stats, title):
 def main():
     args = parse_args()
 
-    # Determine output filename and redirect stdout
     output_filename = os.path.splitext(args.json_file)[0] + '.txt'
     original_stdout = sys.stdout
     
     try:
         with open(output_filename, 'w', encoding='utf-8') as f:
-            sys.stdout = f # Redirect print to file
+            sys.stdout = f
 
             try:
                 df = pd.read_json(args.json_file)
@@ -112,14 +113,12 @@ def main():
                 print(f"Error reading {args.json_file}: {e}")
                 sys.exit(1)
 
-            # --- Data Preparation ---
             df["rent_value"] = df["rent"].apply(clean_numeric)
             df["sqft_value"] = df["sqft"].apply(clean_numeric)
             df[["bedrooms", "bathrooms"]] = df.apply(
                 lambda row: pd.Series(extract_bed_bath(row["layout"])), axis=1
             )
 
-            # --- Apply Filters Globally ---
             df_filtered = df.copy()
             bed_op, bed_val = parse_numeric_filter(args.bed)
             bath_op, bath_val = parse_numeric_filter(args.bath)
@@ -130,34 +129,41 @@ def main():
             if args.date:
                 df_filtered = df_filtered[df_filtered["availability"].astype(str).str.contains(args.date, case=False, na=False)]
             
-            # --- Iterate and Print by Property ---
             pd.set_option("display.max_rows", None)
             pd.set_option("display.width", 200)
             pd.set_option("display.colheader_justify", "center")
             
             all_properties_summary_data = []
 
-            for property_url, group in df.groupby('property_url'):
+            # NEW: Get a sorted list of unique property URLs to iterate over
+            sorted_property_urls = sorted(df['property_url'].unique())
+
+            for property_url in sorted_property_urls:
+                # Use the original dataframe `df` to get the full group for availability stats
+                group = df[df['property_url'] == property_url]
+
                 print("\n" + "="*80)
                 print(f"PROPERTY: {property_url}")
                 print("="*80)
 
-                # 1. Filtered Unit Details for this Property
                 property_filtered_units = df_filtered[df_filtered['property_url'] == property_url]
                 
                 print("--- Filtered Unit Details ---")
                 if not property_filtered_units.empty:
+                    # NEW: Sort the units by bedrooms, then by unit number
+                    property_filtered_units = property_filtered_units.sort_values(
+                        by=['bedrooms', 'unit_number'],
+                        na_position='last' # Puts units with missing info at the end
+                    )
                     display_cols = ["unit_number", "layout", "sqft", "availability", "rent"]
                     print(property_filtered_units[display_cols].to_string(index=False))
                 else:
                     print("No units match the specified filters for this property.")
 
-                # 2. Property Availability Summary
-                # FIXED: Check if the column exists before trying to access it
                 if 'total_property_units' in group.columns:
                     total_units = group['total_property_units'].iloc[0]
                 else:
-                    total_units = None # Gracefully handle missing data in old files
+                    total_units = None
 
                 available_units_scraped = len(group)
                 
@@ -173,11 +179,9 @@ def main():
                 print(f"Available Units (on Zillow): {available_units_scraped}")
                 print(f"Availability Pct: {availability_pct_str}")
                 
-                # 3. Summary for this Property's Filtered Units
                 property_stats = get_summary_stats(property_filtered_units)
                 print_summary_stats(property_stats, "Summary for this Property")
 
-                # 4. Collect data for final summary table
                 all_properties_summary_data.append({
                     'property_url': property_url,
                     'total_units': total_units_str,
@@ -188,25 +192,23 @@ def main():
                     'avg_rent_per_sqft': f"${property_stats['avg_rent_per_sqft']:,.2f}" if property_stats['avg_rent_per_sqft'] is not None else "N/A",
                 })
 
-            # --- Grand Total Summary ---
             print("\n" + "="*80)
             print("GRAND TOTAL SUMMARY (ALL PROPERTIES)")
             print("="*80)
             total_stats = get_summary_stats(df_filtered)
             print_summary_stats(total_stats, "Overall Summary (for all filtered results)")
 
-            # --- All Properties Comparison Table ---
             if all_properties_summary_data:
                 print("\n" + "="*80)
                 print("ALL PROPERTIES COMPARISON")
                 print("="*80)
+                # The dataframe is already sorted because we iterated by sorted URL
                 summary_df = pd.DataFrame(all_properties_summary_data)
                 print(summary_df.to_string(index=False))
 
     finally:
-        sys.stdout = original_stdout # Restore print to console
+        sys.stdout = original_stdout
 
-    # Print confirmation message to the console
     print(f"Output successfully saved to {output_filename}")
 
 
