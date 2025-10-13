@@ -146,19 +146,35 @@ def parse_units(html, url, total_units):
         unit_text_wo_layout = re.sub(r"(?i)\b(Floor plan|3D tour|Special offer|\d+\s*photos?)\b", " ", unit_text_wo_layout)
         unit_text_wo_layout = norm(unit_text_wo_layout)
 
-        # --- Extract unit number (prefer prefixed IDs like A-244, then pure numbers, then "Plan X") ---
+        # --- [IMPROVED] Extract unit number ---
         unit_number = None
-        m = re.search(r"\b[A-Z]-?\d{1,4}\b", unit_text_wo_layout)  # A-244, B505, etc.
-        if m:
-            unit_number = m.group(0)
-        else:
-            m = re.search(r"(?i)\bPlan\s+[A-Za-z0-9]+\b", unit_text_wo_layout)
-            if m:
-                unit_number = m.group(0).title()
-            else:
-                m = re.search(r"\b\d{1,4}\b", unit_text_wo_layout)  # 3, 22, 182, etc.
-                if m:
-                    unit_number = m.group(0)
+        # A series of patterns to try in order. First match wins.
+        patterns_to_try = [
+            # 1. For formats like 'A-244', 'B505'. Case-insensitive match, then uppercase.
+            (re.compile(r"\b[A-Z]-?\d+\b", re.IGNORECASE), lambda m: m.group(0).upper()),
+            
+            # 2. For formats like '1-215', '1-6520311'.
+            (re.compile(r"\b\d+-\d+\b"), lambda m: m.group(0)),
+            
+            # 3. For formats like 'Plan 1X1', 'Unit 10207', '# 5'. Captures the identifier after the keyword.
+            (re.compile(r"(?i)\b(?:Plan|Unit|Apt|#|Model)\s*([A-Za-z0-9\-]+)\b"), lambda m: m.group(1)),
+            
+            # 4. For alphanumeric codes like '1X1', 'TH3B'. Must contain at least one letter.
+            # Uses a lookahead to ensure a letter exists. Matches 2-8 character codes.
+            (re.compile(r"\b(?=\w*[a-zA-Z])\w{2,8}\b", re.IGNORECASE), lambda m: m.group(0).upper()),
+            
+            # 5. For pure numbers of 2 or more digits, like '10207'.
+            (re.compile(r"\b\d{2,8}\b"), lambda m: m.group(0)),
+
+            # 6. Fallback for single-digit unit numbers. Last resort.
+            (re.compile(r"\b\d\b"), lambda m: m.group(0))
+        ]
+
+        for pattern, extractor in patterns_to_try:
+            match = pattern.search(unit_text_wo_layout)
+            if match:
+                unit_number = extractor(match)
+                break # Stop after the first successful match
 
         # --- Sqft: prefer the numeric portion from the sqft cell; ignore if it's actually layout text ---
         sqft = None
@@ -254,8 +270,6 @@ async def main(input_file, out_file, headless=True):
     # Save JSON file only
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(all_units, f, indent=2, ensure_ascii=False)
-    
-    # REMOVED CSV output
 
     print(f"\n✅ Scraping completed. {len(all_units)} units saved to {out_file}")
 
