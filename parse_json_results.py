@@ -45,7 +45,6 @@ def extract_bed_bath(layout):
     bath_match = re.search(r"(\d+(?:\.\d+)?)\s*ba", layout, re.IGNORECASE)
     bed = int(bed_match.group(1)) if bed_match else None
     bath = float(bath_match.group(1)) if bath_match else None
-    # CHANGED: Treat Studio as 1 bedroom
     if bed is None and isinstance(layout, str) and 'studio' in layout.lower():
         bed = 1
     return bed, bath
@@ -72,25 +71,35 @@ def get_summary_stats(df):
     for i in range(1, 4):
         stats[f'avg_rent_per_sqft_{i}br'] = None
         stats[f'avg_sqft_{i}br'] = None
+        # NEW: Keys for rent range
+        stats[f'min_rent_{i}br'] = None
+        stats[f'avg_rent_{i}br'] = None
+        stats[f'max_rent_{i}br'] = None
 
-    if not df.empty and df["rent_value"].notna().any() and df["sqft_value"].notna().any():
+    if not df.empty and df["rent_value"].notna().any():
         stats["avg_rent"] = df["rent_value"].mean()
         stats["min_rent"] = df["rent_value"].min()
         stats["max_rent"] = df["rent_value"].max()
-        avg_sqft = df["sqft_value"].mean()
-        stats["avg_sqft"] = avg_sqft
-        if avg_sqft and avg_sqft > 0:
-            stats["avg_rent_per_sqft"] = stats["avg_rent"] / avg_sqft
+        if df["sqft_value"].notna().any():
+            avg_sqft = df["sqft_value"].mean()
+            stats["avg_sqft"] = avg_sqft
+            if avg_sqft and avg_sqft > 0:
+                stats["avg_rent_per_sqft"] = stats["avg_rent"] / avg_sqft
         
         # Calculate stats for 1, 2, and 3 bedrooms
         for br_count in range(1, 4):
             br_df = df[df['bedrooms'] == br_count]
-            if not br_df.empty and br_df["rent_value"].notna().any() and br_df["sqft_value"].notna().any():
-                br_avg_sqft = br_df['sqft_value'].mean()
-                if br_avg_sqft and br_avg_sqft > 0:
-                    stats[f'avg_sqft_{br_count}br'] = br_avg_sqft
-                    br_avg_rent = br_df['rent_value'].mean()
-                    stats[f'avg_rent_per_sqft_{br_count}br'] = br_avg_rent / br_avg_sqft
+            if not br_df.empty and br_df["rent_value"].notna().any():
+                # NEW: Calculate and store rent range
+                stats[f'min_rent_{br_count}br'] = br_df['rent_value'].min()
+                stats[f'avg_rent_{br_count}br'] = br_df['rent_value'].mean()
+                stats[f'max_rent_{br_count}br'] = br_df['rent_value'].max()
+
+                if br_df["sqft_value"].notna().any():
+                    br_avg_sqft = br_df['sqft_value'].mean()
+                    if br_avg_sqft and br_avg_sqft > 0:
+                        stats[f'avg_sqft_{br_count}br'] = br_avg_sqft
+                        stats[f'avg_rent_per_sqft_{br_count}br'] = stats[f'avg_rent_{br_count}br'] / br_avg_sqft
             
     return stats
 
@@ -103,17 +112,26 @@ def print_summary_stats(stats, title):
         return
 
     print(f"Listings matched: {stats['listings_matched']}")
-    if stats['avg_rent'] is not None:
-        print(f"Average Rent: ${stats['avg_rent']:,.0f}")
-        print(f"Lowest Rent:  ${stats['min_rent']:,.0f}")
-        print(f"Highest Rent: ${stats['max_rent']:,.0f}")
     
-    # NEW: Combined value format
-    if stats.get('avg_rent_per_sqft') is not None and stats.get('avg_sqft') is not None:
-        print(f"Average Value: ${stats['avg_rent_per_sqft']:,.2f} @ {stats['avg_sqft']:,.0f} sqft")
-    
-    br_map = {1: '1br', 2: '2br', 3: '3br'}
+    br_map = {1: '1 bedroom', 2: '2 bedroom', 3: '3 bedroom'}
     for br_count, label in br_map.items():
+        min_key = f'min_rent_{br_count}br'
+        avg_key = f'avg_rent_{br_count}br'
+        max_key = f'max_rent_{br_count}br'
+        
+        if stats.get(min_key) is not None:
+            min_rent = f"${stats[min_key]:,.0f}"
+            avg_rent = f"${stats[avg_key]:,.0f}"
+            max_rent = f"${stats[max_key]:,.0f}"
+            print(f"Lowest-Average-Highest Rent for {label}: {min_rent}, {avg_rent}, {max_rent}")
+    
+    # Print Value section
+    print("") # Add a newline for spacing
+    if stats.get('avg_rent_per_sqft') is not None and stats.get('avg_sqft') is not None:
+        print(f"Average Value (All): ${stats['avg_rent_per_sqft']:,.2f} @ {stats['avg_sqft']:,.0f} sqft")
+    
+    br_map_short = {1: '1br', 2: '2br', 3: '3br'}
+    for br_count, label in br_map_short.items():
         sqft_key = f'avg_sqft_{br_count}br'
         rent_key = f'avg_rent_per_sqft_{br_count}br'
         if stats.get(rent_key) is not None and stats.get(sqft_key) is not None:
@@ -183,6 +201,9 @@ def main():
                     total_units = None
 
                 available_units_scraped = len(group)
+                # NEW: Calculate Available Now units for this property
+                now_units = group['availability'].str.contains('Now', case=False, na=False).sum()
+                
                 availability_pct = None
                 if pd.notna(total_units) and total_units > 0:
                     availability_pct = (available_units_scraped / total_units) * 100
@@ -192,21 +213,21 @@ def main():
                 print("\n--- Property Availability Summary ---")
                 print(f"Total Units (from input): {total_units_str}")
                 print(f"Available Units (on Zillow): {available_units_scraped}")
+                print(f"Available Now Units: {now_units}")
                 print(f"Availability Pct: {availability_pct_str}")
                 
                 property_stats = get_summary_stats(property_filtered_units)
-                print_summary_stats(property_stats, "Summary for this Property")
+                print_summary_stats(property_stats, "Summary for this Property (based on filtered results)")
 
-                # NEW: Create combined value fields for summary table
                 summary_entry = {
                     'property_url': property_url,
                     'total_units': total_units_str,
                     'available_units': available_units_scraped,
+                    'available_now': now_units, # Add to summary table
                     'availability_pct': availability_pct_str,
                     'filtered_units_count': property_stats['listings_matched'],
                 }
-
-                # Add overall average value
+                
                 avg_rent_val = property_stats.get('avg_rent_per_sqft')
                 avg_sqft_val = property_stats.get('avg_sqft')
                 if avg_rent_val is not None and avg_sqft_val is not None:
@@ -214,7 +235,6 @@ def main():
                 else:
                     summary_entry['avg_value'] = "N/A"
 
-                # Add per-bedroom values
                 for i in range(1, 4):
                     rent_key = f'avg_rent_per_sqft_{i}br'
                     sqft_key = f'avg_sqft_{i}br'
