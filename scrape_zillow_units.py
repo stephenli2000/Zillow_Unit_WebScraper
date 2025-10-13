@@ -7,6 +7,9 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from pathlib import Path
+import os
+from datetime import datetime
+import argparse
 
 # ----------------------------
 # Utility: smart, human-like delay
@@ -202,10 +205,10 @@ def parse_units(html, url):
 # ----------------------------
 # Main function
 # ----------------------------
-async def main(input_csv, out_file, headless=True):
+async def main(input_file, out_file, headless=True):
     # MODIFIED: Read a text file, extracting only the URL from each line
     urls = []
-    with open(input_csv, "r", encoding="utf-8") as f:
+    with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 # Take the first part of the line, delimited by comma or space
@@ -249,19 +252,14 @@ async def main(input_csv, out_file, headless=True):
 # CLI entry point
 # ----------------------------
 if __name__ == "__main__":
-    import argparse
-    from datetime import datetime
-    import os
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="Text file with one Zillow URL per line")
-    parser.add_argument("--out", default="units_output", help="Base output file name (without extension)")
     parser.add_argument("--headless", type=str, default="true", help="Set 'false' to keep Chrome visible")
     args = parser.parse_args()
 
-    # Generate timestamp suffix
+    # Generate output file name from input file name
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_name = os.path.splitext(args.out)[0]  # drop extension if user passed .json accidentally
+    base_name = os.path.splitext(args.input)[0]  # Get basename from input
     json_out = f"{base_name}_{ts}.json"
 
     headless = args.headless.lower() == "true"

@@ -37,11 +37,11 @@ google-chrome --remote-debugging-port=9222 \
 
 Create a text file with one Zillow complex URL per line:
 
-https://www.zillow.com/apartments/san-jose-ca/ascent/65ZDfy/
-https://www.zillow.com/apartments/san-jose-ca/vio/65fDwQ/
+https://www.zillow.com/apartments/san-jose-ca/ascent/65ZDfy/, <total number of units>
+https://www.zillow.com/apartments/san-jose-ca/vio/65fDwQ/, <total number of units>
 
 ## Scrape (record units)
-python scrape_zillow_units.py --input zillow_url_list.txt --out units_output --headless true
+python scrape_zillow_units.py --input san_jose_properties.txt --headless true
 
 
 --input: TXT file, one URL per line.
