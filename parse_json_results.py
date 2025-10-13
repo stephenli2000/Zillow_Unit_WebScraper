@@ -98,7 +98,7 @@ def print_summary_stats(stats, title):
 def main():
     args = parse_args()
 
-    # NEW: Determine output filename and redirect stdout
+    # Determine output filename and redirect stdout
     output_filename = os.path.splitext(args.json_file)[0] + '.txt'
     original_stdout = sys.stdout
     
@@ -153,7 +153,12 @@ def main():
                     print("No units match the specified filters for this property.")
 
                 # 2. Property Availability Summary
-                total_units = group['total_property_units'].iloc[0]
+                # FIXED: Check if the column exists before trying to access it
+                if 'total_property_units' in group.columns:
+                    total_units = group['total_property_units'].iloc[0]
+                else:
+                    total_units = None # Gracefully handle missing data in old files
+
                 available_units_scraped = len(group)
                 
                 availability_pct = None
@@ -201,7 +206,7 @@ def main():
     finally:
         sys.stdout = original_stdout # Restore print to console
 
-    # NEW: Print confirmation message to the console
+    # Print confirmation message to the console
     print(f"Output successfully saved to {output_filename}")
 
 
