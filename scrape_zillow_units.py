@@ -1,3 +1,16 @@
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2025 Stephen Li
+#
+# File: scrape_zillow_units.py
+# Author: Stephen Li
+#
+# Description: This script launches a controlled Chrome instance to scrape
+#              apartment unit data from Zillow property pages.
+#
+# This tool is provided for free for individual, personal use.
+#
+
 import asyncio
 import json
 import time
@@ -10,7 +23,7 @@ from pathlib import Path
 import os
 from datetime import datetime
 import argparse
-import subprocess # NEW: Import subprocess to launch Chrome
+import subprocess
 
 # ----------------------------
 # Utility: smart, human-like delay
@@ -240,6 +253,16 @@ async def main(input_file, out_file, headless=True):
 # CLI entry point
 # ----------------------------
 if __name__ == "__main__":
+    BANNER = """
+=======================================================================
+ Zillow Unit WebScraper
+ Copyright (c) 2025 Stephen Li
+
+ This tool is provided for free for individual, personal use.
+=======================================================================
+"""
+    print(BANNER)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="Text file with one Zillow URL per line")
     parser.add_argument("--headless", type=str, default="true", help="Set 'false' to keep Playwright visible")
