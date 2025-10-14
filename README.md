@@ -1,17 +1,18 @@
 # Zillow Unit WebScraper
 
-This is vibe scraping: simple logs, human-like scrolling/delays, and a workflow that keeps a human in the loop.
+This tool is designed to help property owners or managers conduct market research around a particular area and speed up analysis so they can answer key questions with very little effort:
+
+* Is the property value of a particular area going up or down?
+* How much should I set my rental property price?
+
+The workflow keeps a human in the loop. For people who are looking for continuously scraping massive amounts of market data, this is **NOT** the right tool.
 
 ## Purpose & Scope
 
-- **Who:** Property owners/analysts.
-- **What:** You provide Zillow complex URLs and open Chrome to review them; the tool automatically scrapes unit info and helps analyze the exported JSON/CSV.
+- **Who:** Property owners/managers, analysts.
+- **What:** You provide Zillow complex URLs; the tool scrapes unit info, and helps analyze the data.
 - **Why:** Understand (1) market trends around your property and (2) rent pricing.
 - **Not:** This software is not intended for scraping massive data automatically with no human involved.
-
-How to find out how many units offered by a property in San Jose?
-
-https://portal.sanjoseca.gov/deployed/sfjsp then search for property permit
 
 ## Setup
 ```bash
@@ -22,70 +23,56 @@ pip install pandas bs4 playwright
 playwright install
 ```
 
-## Start Chrome (human-in-the-loop)
-
-Keep this Chrome open while scraping (your normal cookies/session apply):
-
-```bash
-mkdir -p ~/user_data_chrome
-google-chrome --remote-debugging-port=9222 \
-  --user-data-dir="$HOME/user_data_chrome" \
-  --no-first-run --no-default-browser-check
-```
-
 ## Input (URLs list)
+Create a text file with one Zillow complex URL per line, followed by a comma and the property's total unit count. You can leave the total unit count empty if it is not available.
 
-Create a text file with one Zillow complex URL per line:
-
-https://www.zillow.com/apartments/san-jose-ca/ascent/65ZDfy/, <total number of units>
-https://www.zillow.com/apartments/san-jose-ca/vio/65fDwQ/, <total number of units>
-
-## Scrape (record units)
-python scrape_zillow_units.py --input san_jose_properties.txt --headless true
-
-
---input: TXT file, one URL per line.
---out: Base name; timestamp is appended.
---headless: "true" to run without visible browser; "false" if you want to see Playwright’s window. (Chrome with :9222 must be running.)
-
-## Output
-
-Two files are written with the same base + timestamp:
-
-…YYYYMMDD_HHMMSS.json
-…YYYYMMDD_HHMMSS.csv
-
-Common fields: property_url, unit_number, layout, sqft, availability, rent, image.
-
-## Post-processing (parse_json_results.py)
-
-The tool helps to analyze the exported JSON/CSV. Use parse_json_results.py for quick filtering, summaries, and basic price metrics.
-
-Basic usage
-```bash
-python parse_json_results.py path/to/units_output_YYYYMMDD_HHMMSS.json
-```
-
-Typical filters (examples)
+Example san_jose_properties.txt:
 
 ```bash
-# Show help to see available flags in your version
-python parse_json_results.py -h
-
-# Example: filter by beds/baths and show a summary
-python parse_json_results.py units.json --beds ">=2" --baths ">=1.5"
-
-# Example: filter by availability text
-python parse_json_results.py units.json --date "Now"
-
-# Example: compute simple $/sqft metrics (if supported by your script)
-python parse_json_results.py units.json --metrics rent,median,per_sqft
+https://www.zillow.com/apartments/san-jose-ca/ascent/65ZDfy/, 405
+https://www.zillow.com/apartments/san-jose-ca/vio/65fDwQ/, 115
+https://www.zillow.com/apartments/san-jose-ca/orchard-park-apartments/5hJ233/,
 ```
 
-If your parse_json_results.py exposes different flags, run -h to view the exact interface. It typically prints filtered tables and basic stats (count, min/median/mean/max, $/sqft if sqft & rent are present).
+How to find out the total units of a property in San Jose?
+
+Use the San Jose Permit Portal and search for the property permit: https://portal.sanjoseca.gov/deployed/sfjsp
+
+## Scrape Data
+This command will automatically launch and connect to a dedicated Chrome browser instance to collect the data.
+```bash
+python scrape_zillow_units.py --input san_jose_properties.txt
+```
+The script will open a special Chrome window. The first time you run it, you may need to log in to Zillow. The script will remember your login for all future runs. When the scrape is done, the script will exit, but the Chrome window will remain open. You can close it or leave it for your next run.
+
+Parameters:
+- --input: TXT file, one URL per line.
+- --headless: "true" to run without a visible Chrome window (this is for scraper's view, not the main Chrome window which will always be visible).
+
+### Scraper Output
+The script generates a single JSON file named after your input file with a timestamp.
+
+Example: san_jose_properties_20251014_123000.json
+
+Common fields: property_url, total_property_units, unit_number, layout, sqft, availability, rent, image.
+
+## Analyze Data
+This script helps you analyze the exported JSON file by creating a detailed text report.
+
+Basic usage:
+
+```bash
+python analyze_zillow_data.py path/to/your_output_file.json
+```
+This will generate a .txt file with the same name, containing a full report.
+
+Example with filters:
+```bash
+# Analyze only 2-bedroom units available "Now"
+python parse_json_results.py your_output.json --bed "=2" --date "Now"
+```
 
 ## Troubleshooting
 
-“No unit table detected”: Ensure the page is visible in your Chrome window and you can access Zillow normally (login if needed).
-
-Keep Chrome with --remote-debugging-port=9222 open while running the scraper.
+- “Failed to connect to or launch Chrome”: Ensure google-chrome is installed and in your system's PATH.
+- “No unit table detected”: The Chrome window launched by the script may be waiting for you to log in to Zillow or solve a CAPTCHA. Interact with the Chrome window to proceed.

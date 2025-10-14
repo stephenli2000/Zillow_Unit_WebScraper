@@ -10,6 +10,7 @@ from pathlib import Path
 import os
 from datetime import datetime
 import argparse
+import subprocess # NEW: Import subprocess to launch Chrome
 
 # ----------------------------
 # Utility: smart, human-like delay
@@ -114,56 +115,37 @@ def parse_units(html, url, total_units):
     for row in rows:
         tds = row.find_all("td", recursive=False)
 
-        # Skip non-data rows
         if len(tds) < 4:
             continue
 
-        # --- Column mapping by position ---
         unit_cell = norm(tds[0].get_text(" ", strip=True))
         sqft_cell = norm(tds[1].get_text(" ", strip=True))
         avail_cell = norm(tds[2].get_text(" ", strip=True))
         rent_cell = norm(tds[3].get_text(" ", strip=True))
-
-        # --- Extract layout from the unit cell, then remove it ---
         layout_pat = r"(?i)(studio(?:,\s*\d+\.?\d*\s*ba)?|[0-9]+\s*bd\s*,\s*[0-9]+\.?\d*\s*ba|[0-9]+\s*bd|[0-9]+\.?\d*\s*ba)"
         layout_m = re.search(layout_pat, unit_cell)
         layout = norm(layout_m.group(0)) if layout_m else None
-
         unit_text_wo_layout = unit_cell
         if layout_m:
             start, end = layout_m.span()
             unit_text_wo_layout = (unit_cell[:start] + " " + unit_cell[end:]).strip()
-
-        # --- Clean known promo tags from the remaining text ---
         unit_text_wo_layout = re.sub(r"(?i)\b(Floor plan|3D tour|Special offer|\d+\s*photos?)\b", " ", unit_text_wo_layout)
         unit_text_wo_layout = norm(unit_text_wo_layout)
-
-        # --- [NEW LOGIC] Extract unit number ---
         unit_number = None
         patterns_to_try = [
-            # 1. For structured formats like 'A-244', 'B505', etc.
             (re.compile(r"\b[A-Z]-?\d+\b", re.IGNORECASE), lambda m: m.group(0).upper()),
-            # 2. For hyphenated numbers like '1-215'.
             (re.compile(r"\b\d+-\d+\b"), lambda m: m.group(0)),
-            # 3. For keyword-prefixed names like 'Plan 2D'. Captures the *entire* phrase.
             (re.compile(r"(?i)\b(?:Plan|Unit|Apt|#|Model)\s*[A-Za-z0-9\s\-]+"), lambda m: m.group(0).strip()),
-            # 4. For alphanumeric codes like '1X1' (must contain both letters and numbers).
             (re.compile(r"\b(?=[A-Za-z]*\d)(?=\d*[A-Za-z])[A-Za-z0-9]{2,8}\b"), lambda m: m.group(0).upper()),
-            # 5. For pure numbers of 2 or more digits.
             (re.compile(r"\b\d{2,8}\b"), lambda m: m.group(0)),
         ]
-
         for pattern, extractor in patterns_to_try:
             match = pattern.search(unit_text_wo_layout)
             if match:
                 unit_number = extractor(match)
                 break
-
-        # FALLBACK: If no structured number was found, use the remaining text as the unit name.
         if not unit_number and unit_text_wo_layout:
             unit_number = unit_text_wo_layout
-
-        # --- Sqft ---
         sqft = None
         if sqft_cell and not re.search(r"(?i)\bbd\b|\bba\b|studio", sqft_cell):
             num = re.search(r"\d[\d,]*", sqft_cell)
@@ -171,32 +153,19 @@ def parse_units(html, url, total_units):
         else:
             num = re.search(r"\b\d{3,4}\b", unit_cell)
             sqft = num.group(0) if num else None
-
-        # --- Availability ---
         availability = avail_cell or None
         if availability and re.fullmatch(r"\d{3,4}", availability):
             all_text = " ".join([unit_cell, sqft_cell, avail_cell, rent_cell])
             date_m = re.search(r"(?i)\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.? \d{1,2}\b|\bNow\b", all_text)
             availability = date_m.group(0).replace(".", "") if date_m else None
-
-        # --- Rent ---
         rent = rent_cell or None
-
-        # --- Image ---
         img_el = tds[0].select_one("img") or row.select_one("img")
         image = img_el["src"] if img_el and img_el.has_attr("src") else None
-
         units.append({
-            "property_url": url,
-            "total_property_units": total_units,
-            "unit_number": unit_number,
-            "layout": layout,
-            "sqft": sqft,
-            "availability": availability,
-            "rent": rent,
-            "image": image,
+            "property_url": url, "total_property_units": total_units,
+            "unit_number": unit_number, "layout": layout, "sqft": sqft,
+            "availability": availability, "rent": rent, "image": image,
         })
-
     return units
 
 # ----------------------------
@@ -207,44 +176,59 @@ async def main(input_file, out_file, headless=True):
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line:
-                continue
-            
+            if not line: continue
             parts = [p.strip() for p in line.split(',')]
             url = parts[0]
-            total_units = None
-            if len(parts) > 1 and parts[1].isdigit():
-                total_units = int(parts[1])
-            
+            total_units = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
             properties_to_scrape.append({'url': url, 'total_units': total_units})
 
     all_units = []
 
     async with async_playwright() as p:
-        user_data_dir = str(Path.home() / "user_data_chrome")
-        print(f"Using existing Chrome profile: {user_data_dir}")
-
-        browser = await p.chromium.connect_over_cdp("http://localhost:9222")
-        print("✅ Connected to existing Chrome session")
+        browser = None
+        # NEW: Robustly connect to or launch Chrome
+        print("🔄 Checking for running Chrome instance...")
+        for i in range(10): # Try for 10 seconds
+            try:
+                browser = await p.chromium.connect_over_cdp("http://localhost:9222")
+                print("✅ Successfully connected to existing Chrome instance.")
+                break
+            except Exception:
+                if i == 0: # Only try to launch on the first attempt
+                    print("⚠️ No running instance found. Launching Chrome...")
+                    data_dir = Path.home() / "zillow_data_chrome"
+                    command = [
+                        'google-chrome',
+                        '--remote-debugging-port=9222',
+                        f'--user-data-dir={data_dir}',
+                        '--no-first-run',
+                        '--no-default-browser-check'
+                    ]
+                    subprocess.Popen(command)
+                await asyncio.sleep(1)
+        
+        if not browser:
+            print("❌ Failed to connect to or launch Chrome after 10 seconds. Aborting.")
+            return
 
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = await context.new_page()
 
         for i, prop_data in enumerate(properties_to_scrape):
-            url = prop_data['url']
-            total_units = prop_data['total_units']
-            
-            html = await scrape_complex(page, url)
+            html = await scrape_complex(page, prop_data['url'])
             if html:
-                units = parse_units(html, url, total_units)
+                units = parse_units(html, prop_data['url'], prop_data['total_units'])
                 all_units.extend(units)
-
             if i < len(properties_to_scrape) - 1:
                 await human_delay(5, 12)
 
-        print("Closing Playwright session...")
-        await context.close()
-        await browser.close()
+        # We don't close the browser, just the context if we created a new one
+        # This leaves the browser window open for the user
+        if not browser.contexts:
+            await context.close()
+        
+        # We also don't close the connection
+        # await browser.close() 
 
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(all_units, f, indent=2, ensure_ascii=False)
@@ -258,7 +242,7 @@ async def main(input_file, out_file, headless=True):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="Text file with one Zillow URL per line")
-    parser.add_argument("--headless", type=str, default="true", help="Set 'false' to keep Chrome visible")
+    parser.add_argument("--headless", type=str, default="true", help="Set 'false' to keep Playwright visible")
     args = parser.parse_args()
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
