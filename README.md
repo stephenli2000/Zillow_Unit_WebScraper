@@ -67,6 +67,27 @@ Example with filters:
 python analyze_zillow_data.py your_output.json --bed "=2" --date "Now"
 ```
 
+## Runs the scraper automatically at a specified time each day
+
+```bash
+# 1. Install dependencies
+pip install schedule --break-system-packages
+sudo apt-get install screen  # if on Linux
+
+# 2. Start in screen
+screen -S zillow_unit_webscraper
+python3 scheduler.py --input san_jose_properties.txt --time "22:30"
+
+# 3. Re-attach to screen
+screen -ls
+screen -r zillow_unit_webscraper
+# Ctrl+A, D to detach
+
+# 3. Auto-restart on boot (optional)
+crontab -e
+# Add: @reboot sleep 60 && screen -dmS zillow_scraper bash -c "cd /home/stephen/workspace/zillow/Zillow_Unit_WebScraper && /home/stephen/workspace/zillow/Zillow_Unit_WebScraper/venv/bin/python3 scheduler.py --input san_jose_properties.txt --time '22:30'"
+```
+
 ## Troubleshooting
 
 - “Failed to connect to or launch Chrome”: Ensure google-chrome is installed and in your system's PATH.
