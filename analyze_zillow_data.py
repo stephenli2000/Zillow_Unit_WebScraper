@@ -244,14 +244,17 @@ def main():
                 availability_pct = None
                 if pd.notna(total_units) and total_units > 0:
                     availability_pct = (available_units_scraped / total_units) * 100
+                    now_pct = (now_units / total_units) * 100
                 total_units_str = f"{total_units:.0f}" if pd.notna(total_units) else "N/A"
                 availability_pct_str = f"{availability_pct:.1f}%" if availability_pct is not None else "N/A"
+                now_pct_str = f"{now_pct:.1f}%" if now_pct is not None else "N/A"
 
                 print("\n--- Property Availability Summary ---")
                 print(f"Total Units (from input): {total_units_str}")
                 print(f"Available Units (on Zillow): {available_units_scraped}")
                 print(f"Available Now Units: {now_units}")
                 print(f"Availability Pct: {availability_pct_str}")
+                print(f"Now Pct: {now_pct_str}")
                 
                 property_stats = get_summary_stats(property_filtered_units)
                 print_summary_stats(property_stats, "Summary for this Property (based on filtered results)")
@@ -262,6 +265,7 @@ def main():
                     'available_units': available_units_scraped,
                     'available_now': now_units,
                     'availability_pct': availability_pct_str,
+                    'now_pct': now_pct_str,
                     'filtered_units_count': property_stats['listings_matched'],
                 }
                 
