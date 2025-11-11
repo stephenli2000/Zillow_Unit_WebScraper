@@ -97,7 +97,7 @@ crontab -e
 - This tool was developed and tested on Ubuntu 24.04 and python 3.12.3
 - This tool was built almost entirely through conversational coding ("vibe coding") in close collaboration with Google's Gemini 2.5 Pro.
 - The author uses a diff tool like kdiff3 to compare the generated .txt reports over time. This is an effective way to track rent changes and market trends.
-- How to find out the total units of a property in San Jose? Use the San Jose Permit Portal and search for the property permit: https://portal.sanjoseca.gov/deployed/sfjsp
+- How to find out the total units of a property in San Jose? Use apartments.com, or the San Jose Permit Portal and search for the property permit: https://portal.sanjoseca.gov/deployed/sfjsp
 
 ## License
 This tool is provided for free for individual, personal use. Please do not redistribute or use for commercial purposes without permission from the author.
