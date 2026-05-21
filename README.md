@@ -90,8 +90,23 @@ crontab -e
 
 ## Troubleshooting
 
-- “Failed to connect to or launch Chrome”: Ensure google-chrome is installed and in your system's PATH.
-- “No unit table detected”: The Chrome window launched by the script may be waiting for you to log in to Zillow or solve a CAPTCHA. Interact with the Chrome window to proceed.
+- “Failed to connect to or launch Chrome”: Ensure google-chrome is installed and in your system's PATH. Verify the session by run chrome manually,
+```bash
+google-chrome --remote-debugging-port=9222 --user-data-dir=~/zillow_data_chrome --no-first-run --no-default-browser-check zillow.com
+```
+
+- “No unit table detected”: The Chrome window launched by the script may be waiting for you to log in to Zillow or solve a CAPTCHA. Interact with the Chrome window to proceed. You may need to clear your Chrome data before scraping again:
+
+```bash
+rm ~/zillow_data_chrome/ -rf
+```
+
+In case Zillow website has changed the format, run the following command,
+```bash
+python3 diagnose_zillow.py
+python3 parse_debug.py
+```
+Then send the output back to us for updating the format.
 
 ## Developer's Notes
 - This tool was developed and tested on Ubuntu 24.04 and python 3.12.3
