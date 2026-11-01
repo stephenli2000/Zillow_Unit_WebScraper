@@ -42,7 +42,9 @@ The script will open a special Chrome window. The first time you run it, you may
 
 Parameters:
 - --input: TXT file, one URL per line.
-- --headless: "true" to run without a visible Chrome window (this is for scraper's view, not the main Chrome window which will always be visible).
+- --headless: accepted for compatibility, but has no effect when the script attaches to the dedicated Chrome window.
+
+If Zillow shows an access verification page or returns HTTP 403/429, the scraper pauses on that tab. Complete the prompt yourself in the Chrome window; the scraper resumes when the unit table appears, without reloading the page. It does not solve the prompt. By default it waits up to 15 minutes; use `--challenge-timeout 0` to wait until you press Ctrl+C, or set another number of seconds. If the wait expires, it saves any units collected so far in a partial JSON file and exits with a nonzero status.
 
 ### Scraper Output
 The script generates a single JSON file named after your input file with a timestamp.
@@ -76,7 +78,7 @@ sudo apt-get install screen  # if on Linux
 
 # 2. Start in screen
 screen -S zillow_unit_webscraper
-python3 scheduler.py --input san_jose_santa_teresa_properties.txt --time "22:30"
+python scheduler.py --input san_jose_santa_teresa_properties.txt --time "22:30"
 
 # 3. Re-attach to screen
 screen -ls
@@ -87,6 +89,7 @@ screen -r zillow_unit_webscraper
 crontab -e
 # Add: @reboot sleep 60 && screen -dmS zillow_scraper bash -c "cd /home/stephen/workspace/zillow/Zillow_Unit_WebScraper && /home/stephen/workspace/zillow/Zillow_Unit_WebScraper/venv/bin/python3 scheduler.py --input san_jose_santa_teresa_properties.txt --time '22:30'"
 ```
+Run the scheduler from the activated virtual environment; it uses the same Python interpreter to launch the scraper.
 
 ## Troubleshooting
 

@@ -24,6 +24,51 @@ import os
 from datetime import datetime
 import argparse
 import subprocess
+import sys
+
+
+class AccessChallenge(Exception):
+    """The site has asked the visitor to stop and verify access."""
+
+
+async def check_access(page, response=None):
+    """Recognize a visible access warning; do not try to work around it."""
+    status = response.status if response else None
+    if status in (403, 429):
+        raise AccessChallenge(f"HTTP {status} at {page.url}")
+
+    title = (await page.title()).lower()
+    body = (await page.locator("body").inner_text(timeout=5000)).lower()
+    warning = re.compile(
+        r"press\s*(?:&|and)\s*hold|verify you are human|are you a robot|"
+        r"unusual traffic|access denied|captcha"
+    )
+    if warning.search(title) or warning.search(body[:5000]):
+        raise AccessChallenge(f"Access verification shown at {page.url}")
+
+
+async def wait_for_manual_verification(page, timeout_seconds=900):
+    """Wait for the user to complete the prompt in Chrome; never click it here."""
+    await page.bring_to_front()
+    print("⏸️ Zillow is asking for verification. Complete it in the open Chrome tab.")
+    print("   The scraper will resume when the unit table appears. Press Ctrl+C to stop.")
+    deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
+
+    while deadline is None or time.monotonic() < deadline:
+        try:
+            await check_access(page)
+            if await page.locator("[data-testid='unit-table-body']").count() > 0:
+                print("✅ Verification complete; resuming on the current page.")
+                return True
+        except AccessChallenge:
+            pass
+        except Exception:
+            # The document may briefly be unavailable while Chrome navigates.
+            pass
+        await asyncio.sleep(2)
+
+    print("⏱️ Verification wait timed out. Leaving the browser tab open.")
+    return False
 
 # ----------------------------
 # Utility: smart, human-like delay
@@ -37,10 +82,11 @@ async def human_delay(min_sec=3, max_sec=8):
 # ----------------------------
 # Page scraping
 # ----------------------------
-async def scrape_complex(page, url):
+async def scrape_complex(page, url, navigate=True):
     print(f"\n🏢 Scraping units for: {url}")
     try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=60000) if navigate else None
+        await check_access(page, response)
 
         # Step 1: initial human-like scroll to load the table
         print("🖱️ Performing initial human scroll...")
@@ -59,7 +105,8 @@ async def scrape_complex(page, url):
 
         # Step 3: iterative expansion for "Show more units" or "Load more"
         expanded = 0
-        while True:
+        while expanded < 20:
+            await check_access(page)
             # Check within the wrapper, regardless of tag name
             show_more_btn = page.locator(
                 "[data-testid='unit-table-body'] tr:has-text('Show') >> text=more units"
@@ -83,6 +130,9 @@ async def scrape_complex(page, url):
                 expanded += 1
                 # Wait for DOM update after each click
                 await asyncio.sleep(random.uniform(3.0, 5.0))
+                await check_access(page)
+            except AccessChallenge:
+                raise
             except Exception as e:
                 print(f"⚠️ Failed to click expand button: {e}")
                 break
@@ -93,7 +143,8 @@ async def scrape_complex(page, url):
         # Step 4: deep scroll to bottom (lazy load safety)
         print("🔽 Scrolling to bottom for lazy-load content...")
         last_height = await page.evaluate("document.body.scrollHeight")
-        while True:
+        for _ in range(10):
+            await check_access(page)
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             await asyncio.sleep(random.uniform(1.5, 2.5))
             new_height = await page.evaluate("document.body.scrollHeight")
@@ -103,13 +154,26 @@ async def scrape_complex(page, url):
 
         # Step 5: ensure table fully populated before scraping
         await asyncio.sleep(2)
+        await check_access(page)
         html = await page.content()
         print("📄 Page HTML captured successfully.")
         return html
 
+    except AccessChallenge:
+        raise
     except Exception as e:
         print(f"❌ Error scraping {url}: {e}")
         return None
+
+
+async def scrape_with_manual_verification(page, url, timeout_seconds):
+    for attempt in range(3):
+        try:
+            return await scrape_complex(page, url, navigate=(attempt == 0))
+        except AccessChallenge as e:
+            print(f"⛔ {e}")
+            if attempt == 2 or not await wait_for_manual_verification(page, timeout_seconds):
+                raise
 
 
 # ----------------------------
@@ -205,7 +269,7 @@ def parse_units(html, url, total_units):
 # ----------------------------
 # Main function
 # ----------------------------
-async def main(input_file, out_file, headless=True):
+async def main(input_file, out_file, headless=True, challenge_timeout=900):
     properties_to_scrape = []
     with open(input_file, "r", encoding="utf-8") as f:
         for line in f:
@@ -242,28 +306,41 @@ async def main(input_file, out_file, headless=True):
         
         if not browser:
             print("❌ Failed to connect to or launch Chrome after 10 seconds. Aborting.")
-            return
+            return 1
 
+        created_context = not browser.contexts
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = await context.new_page()
-
-        for i, prop_data in enumerate(properties_to_scrape):
-            html = await scrape_complex(page, prop_data['url'])
-            if html:
-                units = parse_units(html, prop_data['url'], prop_data['total_units'])
-                all_units.extend(units)
-                print(f"📊 Found {len(units)} units successfully.")
-            if i < len(properties_to_scrape) - 1:
-                await human_delay(5, 12)
-
-        # We don't close the browser, just the context if we created a new one
-        if not browser.contexts:
-            await context.close()
+        challenged = False
+        try:
+            for i, prop_data in enumerate(properties_to_scrape):
+                try:
+                    html = await scrape_with_manual_verification(
+                        page, prop_data['url'], challenge_timeout
+                    )
+                except AccessChallenge:
+                    challenged = True
+                    break
+                if html:
+                    units = parse_units(html, prop_data['url'], prop_data['total_units'])
+                    all_units.extend(units)
+                    print(f"📊 Found {len(units)} units successfully.")
+                if i < len(properties_to_scrape) - 1:
+                    await human_delay(5, 12)
+        finally:
+            if not challenged:
+                await page.close()
+            if created_context and not challenged:
+                await context.close()
         
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(all_units, f, indent=2, ensure_ascii=False)
 
+    if challenged:
+        print(f"\n⚠️ Partial run: {len(all_units)} units saved to {out_file}")
+        return 1
     print(f"\n✅ Scraping completed. {len(all_units)} units saved to {out_file}")
+    return 0
 
 
 # ----------------------------
@@ -282,12 +359,18 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, help="Text file with one Zillow URL per line")
-    parser.add_argument("--headless", type=str, default="true", help="Set 'false' to keep Playwright visible")
+    parser.add_argument("--headless", type=str, default="true", help="Legacy option; attached Chrome visibility is unchanged")
+    parser.add_argument(
+        "--challenge-timeout", type=int, default=900,
+        help="Seconds to wait for manual verification (default: 900; 0 waits until Ctrl+C)",
+    )
     args = parser.parse_args()
+    if args.challenge_timeout < 0:
+        parser.error("--challenge-timeout must be zero or a positive number")
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = os.path.splitext(args.input)[0]
     json_out = f"{base_name}_{ts}.json"
 
     headless = args.headless.lower() == "true"
-    asyncio.run(main(args.input, json_out, headless))
+    sys.exit(asyncio.run(main(args.input, json_out, headless, args.challenge_timeout)))

@@ -42,7 +42,7 @@ class ScraperScheduler:
         try:
             # Run the scraper in non-headless mode (Chrome UI visible)
             result = subprocess.run(
-                ["python3", self.script_path, "--input", self.input_file],
+                [sys.executable, self.script_path, "--input", self.input_file],
                 capture_output=False,  # Show output in real-time
                 text=True
             )
