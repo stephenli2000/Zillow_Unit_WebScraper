@@ -25,7 +25,7 @@ playwright install # Only once if needed
 ## Input (Apartment Property list)
 Create a text file with one Zillow apartment URL per line, followed by a comma and the property's total unit count. Leave the total unit count empty if it is not available.
 
-Example san_jose_properties.txt:
+Example san_jose_santa_teresa_properties.txt:
 
 ```bash
 https://www.zillow.com/apartments/san-jose-ca/ascent/65ZDfy/, 405
@@ -36,7 +36,7 @@ https://www.zillow.com/apartments/san-jose-ca/vio/65fDwQ/, 115
 ## Scrape Zillow Website
 This command will automatically launch and connect to a dedicated Chrome browser instance to collect the data.
 ```bash
-python scrape_zillow_units.py --input san_jose_properties.txt
+python scrape_zillow_units.py --input san_jose_santa_teresa_properties.txt
 ```
 The script will open a special Chrome window. The first time you run it, you may need to log in to Zillow. The script will remember your login for all future runs. When the scrape is done, the script will exit, but the Chrome window will remain open. You can close it or leave it for your next run.
 
@@ -76,7 +76,7 @@ sudo apt-get install screen  # if on Linux
 
 # 2. Start in screen
 screen -S zillow_unit_webscraper
-python3 scheduler.py --input san_jose_properties.txt --time "22:30"
+python3 scheduler.py --input san_jose_santa_teresa_properties.txt --time "22:30"
 
 # 3. Re-attach to screen
 screen -ls
@@ -85,7 +85,7 @@ screen -r zillow_unit_webscraper
 
 # 3. Auto-restart on boot (optional)
 crontab -e
-# Add: @reboot sleep 60 && screen -dmS zillow_scraper bash -c "cd /home/stephen/workspace/zillow/Zillow_Unit_WebScraper && /home/stephen/workspace/zillow/Zillow_Unit_WebScraper/venv/bin/python3 scheduler.py --input san_jose_properties.txt --time '22:30'"
+# Add: @reboot sleep 60 && screen -dmS zillow_scraper bash -c "cd /home/stephen/workspace/zillow/Zillow_Unit_WebScraper && /home/stephen/workspace/zillow/Zillow_Unit_WebScraper/venv/bin/python3 scheduler.py --input san_jose_santa_teresa_properties.txt --time '22:30'"
 ```
 
 ## Troubleshooting
